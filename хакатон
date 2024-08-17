@@ -1,0 +1,94 @@
+!pip install python-telegram-bot openai
+!pip install openai
+!pip install numpy
+!pip install scikit-learn
+
+import functools
+import openai
+import numpy as np
+import sqlite3
+import threading
+import time
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from sklearn.metrics.pairwise import cosine_similarity
+
+topic = "play in D&D"
+model = "text-embedding-ada-002"
+
+start_message = ("Привет! Добро пожаловать в мир Dungeons & Dragons вместе с нашим ботом. "
+        "Здесь ты найдёшь всё, что нужно для эпичных приключений:\n\n"
+        "1️⃣ *Правила* – освежи в памяти основные механики игры, узнай, как действуют заклинания, "
+        "и разберись в сложных ситуациях.\n\n"
+        "2️⃣ *Создание приключений* – получи помощь в создании увлекательных квестов и сценариев для твоих игроков.\n\n"
+        "3️⃣ *Музыка* – добавь атмосферу в свою игру с помощью уникальных мелодий, созданных специально для твоих приключений.\n\n"
+        "Выбирай, что тебе нужно, и начнем творить магию! ✨\n\n"
+        "p.s. для использования подключите VPN")
+
+token = '7476944967:AAHKrrV8ylvi7m6fr6WQqHz8hqn0fF0N_fs'
+openai.api_key= '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'
+
+app = Application.builder().token(token).build()
+
+def retry_on_error(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        e = None
+        max_retries = 3
+        for i in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as ex:
+                e = ex
+                print(f"Error occurred, retrying ({i+1}/{max_retries} attempts)...")
+
+        if e is not None:
+            raise e
+
+    return wrapper
+
+@retry_on_error
+def call_chatgpt(*args, **kwargs):
+    return openai.ChatCompletion.create(*args, **kwargs)
+
+def get_embedding(text, model="text-embedding-ada-002"):
+    text = text.replace("\n", " ")
+    return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
+
+def collect_full_prompt(question):
+    prompt = f'Мне нужен ответ на вопрос по теме "{topic}": {{{question}}}.'
+    return prompt
+
+def collect_dnd_prompt(description):
+    prompt = (
+        "Помоги придумать приключение для игры в Dungeons & Dragons. "
+        "Учитывай следующее описание мира и цели: "
+        f"\"{description}\". "
+        "Придумай сюжет, препятствия, злодеев, неожиданные повороты событий и другие важные элементы игры."
+    )
+    return prompt
+
+def start(update, context):
+    user = update.effective_user
+    keyboard = [
+        [InlineKeyboardButton("вспомнить правила", callback_data='button_1')],
+        [InlineKeyboardButton("создать приключение /не раб.", callback_data='button_2')],
+        [InlineKeyboardButton("создать мелодии /не раб.", callback_data='button_3')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    context.bot.send_message(chat_id=user.id, text=start_message, reply_markup=reply_markup)
+
+
+def button_handler(update, context):
+    query = update.callback_query
+    callback_data = query.data
+
+    if callback_data == 'button_1':
+        context.bot.send_message(chat_id=query.from_user.id, text="Если Вы хотите вспомнить правила или у есть какие-то конкретные вопросы - задавайте. Я постараюсь Вам помочь.")
+        context.chat_data['status'] = 0  # Начальное состояние для кнопки 1
+    elif callback_data == 'button_2':
+        context.bot.send_message(chat_id=query.from_user.id, text="Чтобы Я помог Вам придумать приключение, пожалуйста, опишите каков Ваш мир. Если его нет, то либо расскажите о рассах персонажей в игре, лиюо напишите 'мира нет, существуют все рассы'")
+    elif callback_data == 'button_3':
+        context.bot.send_message(chat_id=query.from_user.id, text="Кнопка 3 выбрана. Функциональность не реализована.")
+
+    query.answer()
